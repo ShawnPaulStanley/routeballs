@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Waste Collection Route Optimizer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-polylinedecorator/dist/leaflet.polylineDecorator.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Roboto', sans-serif;
+    }
+
+    body {
+      display: flex;
+      height: 100vh;
+      background: #f5f5f5;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: white;
+      padding: 20px;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .main-content {
+      flex: 1;
+      position: relative;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    .header {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #eee;
+    }
+
+    .header h1 {
+      color: #2196F3;
+      font-size: 1.5rem;
+      margin-bottom: 8px;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      margin-bottom: 20px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 10px;
+      border: none;
+      border-radius: 4px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .btn-primary {
+      background: #2196F3;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1976D2;
+    }
+
+    .btn-secondary {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #388E3C;
+    }
+
+    .route-info {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: auto;
+    }
+
+    .route-info h3 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    .custom-div-icon div {
+      transition: all 0.3s ease;
+    }
+
+    .custom-div-icon div:hover {
+      transform: scale(1.1);
+    }
+
+    .leaflet-popup-content {
+      margin: 10px;
+    }
+
+    .directions-panel {
+      margin-top: 20px;
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .directions-list {
+      font-size: 0.9rem;
+      color: #666;
+    }
+
+    .direction-step {
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: flex-start;
+    }
+
+    .step-number {
+      background: #2196F3;
+      color: white;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      text-align: center;
+      line-height: 20px;
+      margin-right: 10px;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="header">
+      <h1>Route Optimizer</h1>
+      <p>Waste Collection Planning System</p>
+    </div>
+
+    <div class="controls">
+      <button id="selectModeBtn" class="btn btn-primary" onclick="toggleSelectionMode()">
+        Start Selecting Points
+      </button>
+      <button class="btn btn-primary" onclick="optimizeRoute()">
+        Optimize Route
+      </button>
+      <button class="btn btn-secondary" onclick="resetMap()">
+        Reset Map
+      </button>
+    </div>
+
+    <div class="route-info">
+      <h3>Route Information</h3>
+      <div class="info-item">
+        <span>Total Stops:</span>
+        <span id="totalStops">0</span>
+      </div>
+      <div class="info-item">
+        <span>Total Distance:</span>
+        <span id="totalDistance">Calculating...</span>
+      </div>
+      <div class="info-item">
+        <span>Estimated Time:</span>
+        <span id="estimatedTime">Calculating...</span>
+      </div>
+    </div>
+
+    <div class="directions-panel">
+      <h3>Turn-by-Turn Directions</h3>
+      <div id="directions-list" class="directions-list"></div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div id="map"></div>
+  </div>
+
+  <script>
+    // Your API key
+    const apiKey = '5b3ce3597851110001cf6248f699bcd48cfa4e4facd7b6b0be138f78'; // This is a sample key, replace with your own
+
+    // Add these variables after your existing constants
+    let selectedPoints = [];
+    let markers = [];
+    let isSelectingMode = false;
+
+    // Setup map - Updated coordinates to center on Coimbatore
+    const map = L.map('map').setView([11.016844, 76.955307], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Add this line after your map initialization
+    map.on('click', onMapClick);
+
+    // Add this function to handle map clicks
+    function onMapClick(e) {
+      if (!isSelectingMode) return;
+      
+      const coord = [e.latlng.lng, e.latlng.lat]; // [longitude, latitude]
+      selectedPoints.push(coord);
+      
+      // Add a numbered marker
+      const marker = L.marker([e.latlng.lat, e.latlng.lng], {
+        icon: L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div style='
+            background-color: ${selectedPoints.length === 1 ? '#4CAF50' : '#2196F3'}; 
+            color: white; 
+            border-radius: 50%; 
+            width: 24px; 
+            height: 24px; 
+            line-height: 24px; 
+            text-align: center; 
+            font-weight: bold;
+            border: 2px solid white;
+            box-shadow: 0 0 4px rgba(0,0,0,0.4);
+          '>${selectedPoints.length}</div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        })
+      }).addTo(map);
+      
+      markers.push(marker);
+      document.getElementById('totalStops').textContent = selectedPoints.length;
+    }
+
+    function optimizeRoute() {
+      if (selectedPoints.length < 2) {
+        alert('Please select at least 2 points first');
+        return;
+      }
+
+      // Create circular route
+      const routeCoordinates = [...selectedPoints, selectedPoints[0]];
+      
+      const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
+
+      const requestData = {
+        coordinates: routeCoordinates,
+        profile: "driving-car",
+        preference: "shortest",
+        units: "km",
+        geometry: true
+      };
+
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, application/geo+json',
+          'Authorization': apiKey
+        },
+        body: JSON.stringify(requestData)
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        // Clear existing routes
+        map.eachLayer((layer) => {
+          if (layer instanceof L.Polyline) {
+            map.removeLayer(layer);
+          }
+        });
+
+        if (data && data.features && data.features[0]) {
+          const coordinates = data.features[0].geometry.coordinates;
+          const routePoints = coordinates.map(coord => [coord[1], coord[0]]);
+          
+          // Draw the main route
+          const routeLine = L.polyline(routePoints, {
+              color: '#2196F3',
+              weight: 4,
+              opacity: 0.8
+          }).addTo(map);
+
+          // Add directional arrows at turns only
+          const decorator = L.polylineDecorator(routeLine, {
+              patterns: [
+                  {
+                      offset: '5%',
+                      repeat: '15%',
+                      symbol: L.Symbol.arrowHead({
+                          pixelSize: 12,
+                          polygon: false,
+                          pathOptions: {
+                              color: '#2196F3',
+                              fillOpacity: 1,
+                              weight: 2
+                          }
+                      })
+                  }
+              ]
+          }).addTo(map);
+
+          // Add numbered markers with special styling for start/end point
+          selectedPoints.forEach((point, index) => {
+            const isStartEnd = index === 0;
+            L.marker([point[1], point[0]], {
+              icon: L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style='
+                  background-color: ${isStartEnd ? '#4CAF50' : '#2196F3'}; 
+                  color: white; 
+                  border-radius: 50%; 
+                  width: 24px; 
+                  height: 24px; 
+                  line-height: 24px; 
+                  text-align: center; 
+                  font-weight: bold;
+                  border: 2px solid white;
+                  box-shadow: 0 0 4px rgba(0,0,0,0.4);
+                '>${index + 1}</div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+              })
+            }).addTo(map);
+          });
+
+          // Update route info
+          updateRouteInfo(data);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to get route. Check console for details.');
+      });
+    }
+
+    // Modify the resetMap function
+    function resetMap() {
+      // Clear all layers including decorators
+      map.eachLayer((layer) => {
+        if (layer instanceof L.Polyline || 
+            layer instanceof L.Marker || 
+            layer._polylineDecorators ||  // Add this to catch decorators
+            layer._layers) {  // This catches decorator groups
+          map.removeLayer(layer);
+        }
+      });
+      
+      // Re-add the base tile layer since it was removed
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      
+      // Reset all variables
+      selectedPoints = [];
+      markers = [];
+      isSelectingMode = false;
+      
+      // Reset UI elements
+      document.getElementById('totalStops').textContent = '0';
+      document.getElementById('totalDistance').textContent = 'Calculating...';
+      document.getElementById('estimatedTime').textContent = 'Calculating...';
+      document.getElementById('directions-list').innerHTML = '';
+      document.getElementById('selectModeBtn').textContent = 'Start Selecting Points';
+      document.getElementById('selectModeBtn').className = 'btn btn-primary';
+      
+      // Reset map view
+      map.setView([11.016844, 76.955307], 13);
+    }
+
+    // Add this function to toggle selection mode
+    function toggleSelectionMode() {
+      isSelectingMode = !isSelectingMode;
+      const btn = document.getElementById('selectModeBtn');
+      
+      if (isSelectingMode) {
+        btn.textContent = 'Stop Selecting';
+        btn.className = 'btn btn-secondary';
+      } else {
+        btn.textContent = 'Start Selecting Points';
+        btn.className = 'btn btn-primary';
+      }
+    }
+
+    // Modify optimizeRoute() to update route info
+    function updateRouteInfo(data) {
+        if (data.features && data.features[0]) {
+            const properties = data.features[0].properties;
+            const segments = properties.segments;
+            
+            // Calculate totals
+            let totalDistance = 0;
+            let totalDuration = 0;
+            
+            // Clear previous directions
+            const directionsList = document.getElementById('directions-list');
+            directionsList.innerHTML = '';
+            
+            // Process each segment
+            segments.forEach((segment, segIndex) => {
+                totalDistance += segment.distance;
+                totalDuration += segment.duration;
+                
+                // Process steps within segment
+                segment.steps.forEach((step, stepIndex) => {
+                    const instruction = step.instruction;
+                    const distance = (step.distance / 1000).toFixed(2);
+                    
+                    const stepDiv = document.createElement('div');
+                    stepDiv.className = 'direction-step';
+                    stepDiv.innerHTML = `
+                        <div class="step-number">${segIndex + 1}.${stepIndex + 1}</div>
+                        <div class="step-instruction">
+                            ${instruction}<br>
+                            <small>${distance} km</small>
+                        </div>
+                    `;
+                    directionsList.appendChild(stepDiv);
+                });
+            });
+
+            // Update route summary
+            const distanceKm = (totalDistance / 1000).toFixed(2);
+            const durationMins = Math.round(totalDuration / 60);
+            
+            document.getElementById('totalDistance').textContent = `${distanceKm} km`;
+            document.getElementById('estimatedTime').textContent = `${durationMins} mins`;
+            document.getElementById('totalStops').textContent = selectedPoints.length;
+        } else {
+            document.getElementById('totalDistance').textContent = '-- km';
+            document.getElementById('estimatedTime').textContent = '-- mins';
+            document.getElementById('directions-list').innerHTML = '<p>No directions available</p>';
+        }
+    }
+  </script>
+</body>
+</html>
+``` 
